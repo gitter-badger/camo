@@ -26,5 +26,6 @@ ENV CAMO_NAT=true
 ENV CAMO_AUTOCERT_DIR=/camo/certs
 
 EXPOSE 443
+EXPOSE 443/udp
 
 ENTRYPOINT [ "./entrypoint.sh" ]
