@@ -133,9 +133,19 @@ func main() {
 		TLSConfig: initTLSConfig(),
 		Dial: func(network, addr string) (net.Conn, error) {
 			if *resolve4 {
-				network = "tcp4"
+				switch network {
+				case "tcp":
+					network = "tcp4"
+				case "udp":
+					network = "udp4"
+				}
 			} else if *resolve6 {
-				network = "tcp6"
+				switch network {
+				case "tcp":
+					network = "tcp6"
+				case "udp":
+					network = "udp6"
+				}
 			}
 			if *resolve != "" {
 				addr = *resolve
