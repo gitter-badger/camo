@@ -25,10 +25,12 @@ import (
 	"github.com/linfn/camo/internal/machineid"
 	"github.com/linfn/camo/internal/util"
 	"golang.org/x/crypto/acme"
+	"github.com/lucas-clemente/quic-go/http3"
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
+
 
 var defaultCertDir = path.Join(getCamoDir(), "certs")
 
@@ -115,12 +117,15 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/", withLog(log, srv.Handler(ctx, "")))
 
-	hsrv := initHTTPServer(camo.WithAuth(mux, *password, log))
+	handler := camo.WithAuth(mux, *password, log)
+	h2 := initHTTPServer(handler)
+	h3 := initHTTP3Server(handler)
 
 	var exitOnce sync.Once
 	exit := func(err error) {
 		exitOnce.Do(func() {
-			hsrv.Close()
+			h2.Close()
+			h3.Close()
 			cancel()
 			if err != nil {
 				log.Errorf("server exits with error %v", err)
@@ -149,11 +154,19 @@ func main() {
 	go func() {
 		defer wg.Done()
 		if !*useH2C {
-			exit(hsrv.ListenAndServeTLS("", ""))
+			exit(h2.ListenAndServeTLS("", ""))
 		} else {
-			exit(hsrv.ListenAndServe())
+			exit(h2.ListenAndServe())
 		}
 	}()
+
+	if !*useH2C {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			exit(h3.ListenAndServe())
+		}()
+	}
 
 	if *debugHTTP != "" {
 		go debugHTTPServer()
@@ -277,6 +290,12 @@ func initHTTPServer(handler http.Handler) *http.Server {
 		hsrv.Handler = handler
 	}
 	return hsrv
+}
+
+func initHTTP3Server(handler http.Handler) *http3.Server {
+	return &http3.Server{
+		Server: initHTTPServer(handler),
+	}
 }
 
 func initTLSConfig() *tls.Config {

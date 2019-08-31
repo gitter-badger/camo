@@ -2,11 +2,18 @@ package camo
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
+	"math/big"
 	"net"
 	"net/http"
 	"sync"
 	"testing"
 
+	"github.com/lucas-clemente/quic-go/http3"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
@@ -193,6 +200,117 @@ func TestClient_Noise(t *testing.T) {
 		t.Error(err)
 	}
 	_, err = c.OpenTunnel(ctx, res.IP)
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+func startTestH3Server(ctx context.Context, t *testing.T, srv *Server) (addr string) {
+	go func() {
+		err := srv.ServeIface(ctx, newIfaceIOMock())
+		if err != nil && ctx.Err() == nil {
+			t.Error(err)
+		}
+	}()
+
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h3 := http3.Server{
+		Server: &http.Server{
+			TLSConfig: generateTLSConfig(),
+			Handler:   srv.Handler(ctx, ""),
+		},
+	}
+	go h3.Serve(conn)
+
+	go func() {
+		<-ctx.Done()
+		h3.Close()
+	}()
+
+	return conn.LocalAddr().String()
+}
+
+func generateTLSConfig() *tls.Config {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		panic(err)
+	}
+	template := x509.Certificate{SerialNumber: big.NewInt(1)}
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		panic(err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+
+	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		panic(err)
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+	}
+}
+
+func TestH3(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srvAddr := startTestH3Server(ctx, t, newTestServer())
+
+	c := Client{
+		CID:  "camo1",
+		Host: srvAddr,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+		UseH3: true,
+	}
+
+	res, err := c.RequestIPv4(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tunnel, err := c.OpenTunnel(ctx, res.IP)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := tunnel(ctx)
+		if err != nil && ctx.Err() == nil {
+			t.Error(err)
+		}
+	}()
+
+	rw, peer := newBidirectionalStream()
+	defer rw.Close()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := c.ServeIface(ctx, peer)
+		if err != nil && ctx.Err() == nil {
+			t.Error(err)
+		}
+	}()
+
+	_, err = rw.Write(newTestIPv4Packet(res.IP, net.ParseIP("10.20.0.1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var recvBuf [DefaultMTU]byte
+	_, err = ReadIPPacket(rw, recvBuf[:])
 	if err != nil {
 		t.Error(err)
 	}

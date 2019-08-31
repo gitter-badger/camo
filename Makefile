@@ -27,7 +27,7 @@ DOCKER_NETWORK=bridge
 docker-dev:
 	docker build -t camo:dev -f docker/Dockerfile.dev .
 	docker rm -f $(DEV_CONTAINER_NAME) 2>/dev/null || true
-	docker create -it -v `pwd`:/camo -p 443:443 -p 6060 \
+	docker create -it -v `pwd`:/camo -p 443:443 -p 443:443/udp -p 6060 \
 		--cap-add=NET_ADMIN --device /dev/net/tun \
 		--sysctl net.ipv6.conf.all.disable_ipv6=0 \
 		--sysctl net.ipv6.conf.default.forwarding=1 \

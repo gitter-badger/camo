@@ -46,6 +46,7 @@ var (
 	reGateway = envflag.Bool("redirect-gateway", "CAMO_REDIRECT_GATEWAY", true, "redirect the gateway")
 	logLevel  = envflag.String("log-level", "CAMO_LOG_LEVEL", camo.LogLevelTexts[camo.LogLevelInfo], "log level")
 	useH2C    = envflag.Bool("h2c", "CAMO_H2C", false, "use h2c (for debug)")
+	useH3     = envflag.Bool("http3", "CAMO_HTTP3", false, "use http3/quic")
 	debugHTTP = envflag.String("debug-http", "CAMO_DEBUG_HTTP", "", "debug http server listen address")
 )
 
@@ -150,6 +151,7 @@ func main() {
 		Auth:   func(r *http.Request) { camo.SetAuth(r, *password) },
 		Logger: log,
 		UseH2C: *useH2C,
+		UseH3:  *useH3,
 		Noise:  getNoise(),
 	}
 
