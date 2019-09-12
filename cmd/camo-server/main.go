@@ -24,13 +24,12 @@ import (
 	"github.com/linfn/camo/internal/envflag"
 	"github.com/linfn/camo/internal/machineid"
 	"github.com/linfn/camo/internal/util"
-	"golang.org/x/crypto/acme"
 	"github.com/lucas-clemente/quic-go/http3"
+	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
-
 
 var defaultCertDir = path.Join(getCamoDir(), "certs")
 
