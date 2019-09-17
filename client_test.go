@@ -2,17 +2,14 @@ package camo
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/tls"
-	"crypto/x509"
-	"encoding/pem"
-	"math/big"
+	"errors"
 	"net"
 	"net/http"
 	"sync"
 	"testing"
 
+	"github.com/linfn/camo/internal/util"
 	"github.com/lucas-clemente/quic-go/http3"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -220,11 +217,16 @@ func startTestH3Server(ctx context.Context, t *testing.T, srv *Server) (addr str
 
 	h3 := http3.Server{
 		Server: &http.Server{
-			TLSConfig: generateTLSConfig(),
-			Handler:   srv.Handler(ctx, ""),
+			TLSConfig: &tls.Config{
+				SessionTicketKey: NewSessionTicketKey("camotest"),
+				GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+					return nil, errors.New("(PSK) bad certificate")
+				},
+			},
+			Handler: srv.Handler(ctx, ""),
 		},
 	}
-	go h3.Serve(conn)
+	go func() { _ = h3.Serve(conn) }()
 
 	go func() {
 		<-ctx.Done()
@@ -234,39 +236,22 @@ func startTestH3Server(ctx context.Context, t *testing.T, srv *Server) (addr str
 	return conn.LocalAddr().String()
 }
 
-func generateTLSConfig() *tls.Config {
-	key, err := rsa.GenerateKey(rand.Reader, 1024)
-	if err != nil {
-		panic(err)
-	}
-	template := x509.Certificate{SerialNumber: big.NewInt(1)}
-	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
-	if err != nil {
-		panic(err)
-	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-
-	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		panic(err)
-	}
-	return &tls.Config{
-		Certificates: []tls.Certificate{tlsCert},
-	}
-}
-
 func TestH3(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	srvAddr := startTestH3Server(ctx, t, newTestServer())
 
+	cs, err := NewTLSPSKSessionCache(util.StripPort(srvAddr), NewSessionTicketKey("camotest"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	c := Client{
 		CID:  "camo1",
 		Host: srvAddr,
 		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true,
+			ServerName:         util.StripPort(srvAddr),
+			ClientSessionCache: cs,
 		},
 		UseH3: true,
 	}
